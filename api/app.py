@@ -1,10 +1,8 @@
-import json
-import os
-import secrets
+import json, os, secrets
+import paho.mqtt.publish as publish
+
 from datetime import datetime, timezone
 from typing import Literal
-
-import paho.mqtt.publish as publish
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query, Response
 from pydantic import BaseModel, Field
@@ -19,8 +17,9 @@ fans = db["fans"]
 readings = db["readings"]
 settings = db["settings"]
 
-fans.create_index("mac", unique=True)   # needed for DuplicateKeyError to fire
+fans.create_index("mac", unique=True)
 fans.create_index("key", unique=True)
+readings.create_index("mac", unique=False)
 settings.create_index("mac", unique=True)
 
 app = FastAPI()
@@ -41,13 +40,11 @@ class Settings(BaseModel):
     max_humidity: float = Field(ge=0, le=100)
 
 
-def get_owner(x_api_key: str | None) -> dict:
-    """401 if the key is missing or unknown, otherwise the fan that owns it."""
+def get_owner(x_api_key: str | None):
     owner = fans.find_one({"key": x_api_key}) if x_api_key else None
     if owner is None:
         raise HTTPException(status_code=401, detail="Missing or unknown API key.")
     return owner
-
 
 @app.post("/fans", status_code=201)
 def create_device(fan: Fan):
@@ -58,12 +55,13 @@ def create_device(fan: Fan):
     except DuplicateKeyError:
         raise HTTPException(status_code=409, detail=f"Fan with MAC {fan.mac} already exists.")
     new_fan.pop("_id")
-    return new_fan  # the key is only ever shown here
+    return new_fan 
 
 
 @app.get("/fans")
 def get_devices():
     return list(fans.find({}, {"_id": 0, "key": 0}))
+
 
 
 @app.get("/fans/{mac}")
